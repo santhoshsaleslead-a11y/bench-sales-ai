@@ -1,3 +1,7 @@
+import gspread
+from google.oauth2.service_account import Credentials
+import os
+from datetime import datetime
 from flask import Flask, render_template, request, redirect, session
 import openai
 import smtplib
