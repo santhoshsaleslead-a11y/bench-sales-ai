@@ -1,53 +1,32 @@
-import os
-import gspread
-from google.oauth2.service_account import Credentials
-
-import gspread
-from google.oauth2.service_account import Credentials
-import os
-from datetime import datetime
 from flask import Flask, render_template, request, redirect, session
-import openai
-import smtplib
-from email.mime.text import MIMEText
+import os
 import json
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
 
+app = Flask(__name__)
+app.secret_key = "supersecretkey"
+
+
+# ---------------- GOOGLE SHEETS SAFE CONNECTION ----------------
 def get_sheet():
-    import json
-    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    try:
+        google_creds = os.getenv("GOOGLE_CREDENTIALS")
+        if not google_creds:
+            print("No GOOGLE_CREDENTIALS found")
+            return None
 
-    google_creds = os.getenv("GOOGLE_CREDENTIALS")
-    if not google_creds:
+        scope = ["https://www.googleapis.com/auth/spreadsheets"]
+        creds_dict = json.loads(google_creds)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
+        client = gspread.authorize(creds)
+
+        return client.open("BenchSalesCRM").sheet1
+
+    except Exception as e:
+        print("Google Sheets Error:", e)
         return None
-
-    google_creds_dict = json.loads(google_creds)
-    creds = Credentials.from_service_account_info(google_creds_dict, scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open("BenchSalesCRM").sheet1
-
-# Google Sheets Setup
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
-
-import json
-google_creds = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-creds = Credentials.from_service_account_info(google_creds, scopes=scope)
-
-client = gspread.authorize(creds)
-sheet = client.open("BenchSalesCRM").sheet1
-
-# Save to Google Sheet
-sheet = get_sheet()
-if sheet:
-    sheet.append_row([
-        "test",
-        "test"
-    ])
-
-
-
-
-# 🔑 Add your OpenAI Key
-openai.api_key = "YOUR_OPENAI_API_KEY"
 
 
 # ---------------- LOGIN ----------------
@@ -72,43 +51,30 @@ def dashboard():
     if "user" not in session:
         return redirect("/")
 
-    ai_result = ""
-    email_status = ""
+    message = ""
 
     if request.method == "POST":
+        vendor_email = request.form.get("email")
+        consultant = request.form.get("consultant")
+        rate = request.form.get("rate")
+        client = request.form.get("client")
 
-        # AI Resume Matching
-        resume = request.form.get("resume")
-        jd = request.form.get("jd")
+        sheet = get_sheet()
 
-        if resume and jd:
-            response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "user",
-                     "content": f"Match this resume:\n{resume}\n\nWith this job description:\n{jd}\n\nGive match percentage and missing skills."}
-                ]
-            )
-            ai_result = response.choices[0].message.content
+        if sheet:
+            sheet.append_row([
+                datetime.now().strftime("%Y-%m-%d"),
+                vendor_email,
+                consultant,
+                rate,
+                client,
+                "Submitted"
+            ])
+            message = "Saved to Google Sheet Successfully!"
+        else:
+            message = "Google Sheet not connected."
 
-        # Email Automation
-        email_to = request.form.get("email")
-        if email_to:
-            msg = MIMEText("Profile submission for your requirement.")
-            msg["Subject"] = "Consultant Submission"
-            msg["From"] = "yourgmail@gmail.com"
-            msg["To"] = email_to
-
-            try:
-                server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-                server.login("yourgmail@gmail.com", "your_app_password")
-                server.sendmail("yourgmail@gmail.com", email_to, msg.as_string())
-                server.quit()
-                email_status = "Email Sent Successfully!"
-            except:
-                email_status = "Email Failed!"
-
-    return render_template("dashboard.html", ai_result=ai_result, email_status=email_status)
+    return render_template("dashboard.html", message=message)
 
 
 # ---------------- LOGOUT ----------------
@@ -118,9 +84,7 @@ def logout():
     return redirect("/")
 
 
+# ---------------- RUN FOR RENDER ----------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
