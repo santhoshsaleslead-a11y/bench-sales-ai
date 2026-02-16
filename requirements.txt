@@ -1,12 +1,9 @@
 fastapi
 uvicorn
-sqlalchemy
-psycopg2-binary
-passlib[bcrypt]
-python-jose
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
 python-multipart
-pydantic
-python-dotenv
-email-validator
 pdfplumber
 python-docx
