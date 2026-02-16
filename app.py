@@ -10,6 +10,13 @@ from email.mime.text import MIMEText
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
+# Google Sheets Setup
+scope = ["https://www.googleapis.com/auth/spreadsheets"]
+creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+client = gspread.authorize(creds)
+sheet = client.open("BenchSalesCRM").sheet1
+
+
 # 🔑 Add your OpenAI Key
 openai.api_key = "YOUR_OPENAI_API_KEY"
 
