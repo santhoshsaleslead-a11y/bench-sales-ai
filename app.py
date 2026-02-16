@@ -12,8 +12,19 @@ import smtplib
 from email.mime.text import MIMEText
 import json
 
-google_creds = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-creds = Credentials.from_service_account_info(google_creds, scopes=scope)
+def get_sheet():
+    import json
+    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+
+    google_creds = os.getenv("GOOGLE_CREDENTIALS")
+    if not google_creds:
+        return None
+
+    google_creds_dict = json.loads(google_creds)
+    creds = Credentials.from_service_account_info(google_creds_dict, scopes=scope)
+    client = gspread.authorize(creds)
+    return client.open("BenchSalesCRM").sheet1
+
 # Google Sheets Setup
 scope = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -25,15 +36,13 @@ client = gspread.authorize(creds)
 sheet = client.open("BenchSalesCRM").sheet1
 
 # Save to Google Sheet
-sheet.append_row([
-    datetime.now().strftime("%Y-%m-%d"),
-    request.form.get("email"),
-    "Consultant Name",
-    "$75/hr",
-    "Client Name",
-    "85%",
-    "Submitted"
-])
+sheet = get_sheet()
+if sheet:
+    sheet.append_row([
+        "test",
+        "test"
+    ])
+
 
 
 
@@ -110,4 +119,8 @@ def logout():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=10000)if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
