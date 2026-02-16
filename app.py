@@ -4,9 +4,21 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
+
+UPLOAD_FOLDER = "uploads"
+ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+
+# ---------------- FILE VALIDATION ----------------
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # ---------------- GOOGLE SHEETS SAFE CONNECTION ----------------
@@ -14,7 +26,6 @@ def get_sheet():
     try:
         google_creds = os.getenv("GOOGLE_CREDENTIALS")
         if not google_creds:
-            print("No GOOGLE_CREDENTIALS found")
             return None
 
         scope = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -27,6 +38,24 @@ def get_sheet():
     except Exception as e:
         print("Google Sheets Error:", e)
         return None
+
+
+# ---------------- REGISTRATION ----------------
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    message = ""
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        sheet = get_sheet()
+        if sheet:
+            sheet.append_row(["USER", username, password])
+            message = "Registration Successful!"
+        else:
+            message = "Sheet not connected."
+
+    return render_template("register.html", message=message)
 
 
 # ---------------- LOGIN ----------------
@@ -59,8 +88,14 @@ def dashboard():
         rate = request.form.get("rate")
         client = request.form.get("client")
 
-        sheet = get_sheet()
+        file = request.files.get("resume")
+        filename = ""
 
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+
+        sheet = get_sheet()
         if sheet:
             sheet.append_row([
                 datetime.now().strftime("%Y-%m-%d"),
@@ -68,9 +103,10 @@ def dashboard():
                 consultant,
                 rate,
                 client,
+                filename,
                 "Submitted"
             ])
-            message = "Saved to Google Sheet Successfully!"
+            message = "Data & Resume Saved Successfully!"
         else:
             message = "Google Sheet not connected."
 
@@ -84,7 +120,7 @@ def logout():
     return redirect("/")
 
 
-# ---------------- RUN FOR RENDER ----------------
+# ---------------- RUN ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
