@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h2>Welcome to Bench Sales AI</h2>
+    <a href="/logout">Logout</a>
+
+    <h3>AI Resume Matcher</h3>
+    <form method="POST">
+        <textarea name="resume" placeholder="Paste Resume Here"></textarea>
+        <textarea name="jd" placeholder="Paste Job Description Here"></textarea>
+        <button type="submit">Analyze</button>
+    </form>
+
+    <div class="result">{{ ai_result }}</div>
+
+    <h3>Email Automation</h3>
+    <form method="POST">
+        <input type="email" name="email" placeholder="Vendor Email">
+        <button type="submit">Send Email</button>
+    </form>
+
+    <div class="result">{{ email_status }}</div>
+
+</div>
+</body>
+</html>
