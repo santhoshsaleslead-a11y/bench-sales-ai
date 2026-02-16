@@ -1,4 +1,12 @@
-flask
-gunicorn
-gspread
-google-auth
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+passlib[bcrypt]
+python-jose
+python-multipart
+pydantic
+python-dotenv
+email-validator
+pdfplumber
+python-docx
