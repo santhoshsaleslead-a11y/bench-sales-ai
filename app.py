@@ -16,6 +16,18 @@ creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
 client = gspread.authorize(creds)
 sheet = client.open("BenchSalesCRM").sheet1
 
+# Save to Google Sheet
+sheet.append_row([
+    datetime.now().strftime("%Y-%m-%d"),
+    request.form.get("email"),
+    "Consultant Name",
+    "$75/hr",
+    "Client Name",
+    "85%",
+    "Submitted"
+])
+
+
 
 # 🔑 Add your OpenAI Key
 openai.api_key = "YOUR_OPENAI_API_KEY"
