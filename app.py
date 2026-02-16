@@ -21,22 +21,41 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-# ---------------- GOOGLE SHEETS SAFE CONNECTION ----------------
-def get_sheet():
+# ---------------- AUTO GOOGLE SHEET CONNECT & CREATE ----------------
+def get_or_create_sheet():
     try:
         google_creds = os.getenv("GOOGLE_CREDENTIALS")
         if not google_creds:
+            print("GOOGLE_CREDENTIALS not set")
             return None
 
-        scope = ["https://www.googleapis.com/auth/BenchSalesAI"]
+        scope = ["https://www.googleapis.com/auth/spreadsheets"]
         creds_dict = json.loads(google_creds)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
 
-        return client.open("BenchSalesCRM").sheet1
+        SHEET_NAME = "BenchSalesCRM"
+
+        try:
+            sheet = client.open(SHEET_NAME).sheet1
+        except:
+            spreadsheet = client.create(SHEET_NAME)
+            sheet = spreadsheet.sheet1
+
+            sheet.append_row([
+                "Date",
+                "Vendor Email",
+                "Consultant",
+                "Rate",
+                "Client",
+                "Resume File",
+                "Status"
+            ])
+
+        return sheet
 
     except Exception as e:
-        print("Google Sheets Error:", e)
+        print("Google Sheet Error:", e)
         return None
 
 
@@ -48,12 +67,12 @@ def register():
         username = request.form["username"]
         password = request.form["password"]
 
-        sheet = get_sheet()
+        sheet = get_or_create_sheet()
         if sheet:
             sheet.append_row(["USER", username, password])
             message = "Registration Successful!"
         else:
-            message = "Sheet not connected."
+            message = "Google Sheet Not Connected."
 
     return render_template("register.html", message=message)
 
@@ -65,6 +84,7 @@ def login():
         username = request.form["username"]
         password = request.form["password"]
 
+        # Simple Admin Login
         if username == "admin" and password == "admin123":
             session["user"] = username
             return redirect("/dashboard")
@@ -86,7 +106,7 @@ def dashboard():
         vendor_email = request.form.get("email")
         consultant = request.form.get("consultant")
         rate = request.form.get("rate")
-        client = request.form.get("client")
+        client_name = request.form.get("client")
 
         file = request.files.get("resume")
         filename = ""
@@ -95,20 +115,21 @@ def dashboard():
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
 
-        sheet = get_sheet()
+        sheet = get_or_create_sheet()
+
         if sheet:
             sheet.append_row([
                 datetime.now().strftime("%Y-%m-%d"),
                 vendor_email,
                 consultant,
                 rate,
-                client,
+                client_name,
                 filename,
                 "Submitted"
             ])
             message = "Data & Resume Saved Successfully!"
         else:
-            message = "Google Sheet not connected."
+            message = "Google Sheet Connection Failed."
 
     return render_template("dashboard.html", message=message)
 
@@ -120,7 +141,7 @@ def logout():
     return redirect("/")
 
 
-# ---------------- RUN ----------------
+# ---------------- RUN FOR RENDER ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
