@@ -1,147 +1,180 @@
-from flask import Flask, render_template, request, redirect, session
 import os
-import json
-import gspread
-from google.oauth2.service_account import Credentials
-from datetime import datetime
-from werkzeug.utils import secure_filename
+import shutil
+import pdfplumber
+import docx
+from datetime import datetime, timedelta
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.orm import sessionmaker, declarative_base
+from passlib.context import CryptContext
+from jose import jwt
+from dotenv import load_dotenv
+import smtplib
 
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
+load_dotenv()
 
-UPLOAD_FOLDER = "uploads"
-ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+app = FastAPI()
+
+pwd_context = CryptContext(schemes=["bcrypt"])
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+SECRET_KEY = "SUPERSECRETKEY"
+ALGORITHM = "HS256"
 
 
-# ---------------- FILE VALIDATION ----------------
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+# ------------------ DATABASE MODELS ------------------
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    email = Column(String, unique=True)
+    password = Column(String)
 
 
-# ---------------- AUTO GOOGLE SHEET CONNECT & CREATE ----------------
-def get_or_create_sheet():
+class Submission(Base):
+    __tablename__ = "submissions"
+    id = Column(Integer, primary_key=True)
+    candidate = Column(String)
+    vendor_email = Column(String)
+    resume_file = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+Base.metadata.create_all(bind=engine)
+
+# ------------------ AUTH ------------------
+
+def create_token(data: dict):
+    expire = datetime.utcnow() + timedelta(hours=10)
+    data.update({"exp": expire})
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        google_creds = os.getenv("GOOGLE_CREDENTIALS")
-        if not google_creds:
-            print("GOOGLE_CREDENTIALS not set")
-            return None
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        db = SessionLocal()
+        user = db.query(User).filter(User.email == email).first()
+        return user
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-        scope = ["https://www.googleapis.com/auth/spreadsheets"]
-        creds_dict = json.loads(google_creds)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
 
-        SHEET_NAME = "BenchSalesCRM"
+# ------------------ REGISTER ------------------
 
-        try:
-            sheet = client.open(SHEET_NAME).sheet1
-        except:
-            spreadsheet = client.create(SHEET_NAME)
-            sheet = spreadsheet.sheet1
+@app.post("/register")
+def register(email: str = Form(...), password: str = Form(...)):
+    db = SessionLocal()
+    hashed = pwd_context.hash(password)
+    user = User(email=email, password=hashed)
+    db.add(user)
+    db.commit()
+    return {"message": "User registered successfully"}
 
-            sheet.append_row([
-                "Date",
-                "Vendor Email",
-                "Consultant",
-                "Rate",
-                "Client",
-                "Resume File",
-                "Status"
-            ])
 
-        return sheet
+# ------------------ LOGIN ------------------
 
+@app.post("/login")
+def login(email: str = Form(...), password: str = Form(...)):
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user or not pwd_context.verify(password, user.password):
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    token = create_token({"sub": user.email})
+    return {"access_token": token}
+
+
+# ------------------ RESUME TEXT EXTRACTION ------------------
+
+def extract_text(file_path):
+    if file_path.endswith(".pdf"):
+        text = ""
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        return text
+    elif file_path.endswith(".docx"):
+        doc = docx.Document(file_path)
+        return "\n".join([p.text for p in doc.paragraphs])
+    return ""
+
+
+# ------------------ SUBMIT PROFILE ------------------
+
+@app.post("/submit")
+def submit_profile(
+    candidate: str = Form(...),
+    vendor_email: str = Form(...),
+    resume: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    db = SessionLocal()
+
+    # Duplicate Detection
+    existing = db.query(Submission).filter(
+        Submission.candidate == candidate,
+        Submission.vendor_email == vendor_email
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Duplicate submission detected")
+
+    # Save File
+    os.makedirs("resumes", exist_ok=True)
+    file_path = f"resumes/{resume.filename}"
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(resume.file, buffer)
+
+    # Extract Text
+    resume_text = extract_text(file_path)
+
+    # Save to DB
+    submission = Submission(
+        candidate=candidate,
+        vendor_email=vendor_email,
+        resume_file=resume.filename
+    )
+    db.add(submission)
+    db.commit()
+
+    # Auto Email Send
+    send_email(vendor_email, candidate)
+
+    return {"message": "Profile submitted successfully"}
+
+
+# ------------------ EMAIL FUNCTION ------------------
+
+def send_email(to_email, candidate):
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+
+        message = f"Subject: Candidate Submission\n\nPlease find profile of {candidate}."
+        server.sendmail(os.getenv("EMAIL_USER"), to_email, message)
+        server.quit()
     except Exception as e:
-        print("Google Sheet Error:", e)
-        return None
+        print("Email error:", e)
 
 
-# ---------------- REGISTRATION ----------------
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    message = ""
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+# ------------------ ADMIN DASHBOARD ------------------
 
-        sheet = get_or_create_sheet()
-        if sheet:
-            sheet.append_row(["USER", username, password])
-            message = "Registration Successful!"
-        else:
-            message = "Google Sheet Not Connected."
-
-    return render_template("register.html", message=message)
-
-
-# ---------------- LOGIN ----------------
-@app.route("/", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        # Simple Admin Login
-        if username == "admin" and password == "admin123":
-            session["user"] = username
-            return redirect("/dashboard")
-        else:
-            return "Invalid Credentials"
-
-    return render_template("login.html")
-
-
-# ---------------- DASHBOARD ----------------
-@app.route("/dashboard", methods=["GET", "POST"])
-def dashboard():
-    if "user" not in session:
-        return redirect("/")
-
-    message = ""
-
-    if request.method == "POST":
-        vendor_email = request.form.get("email")
-        consultant = request.form.get("consultant")
-        rate = request.form.get("rate")
-        client_name = request.form.get("client")
-
-        file = request.files.get("resume")
-        filename = ""
-
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
-
-        sheet = get_or_create_sheet()
-
-        if sheet:
-            sheet.append_row([
-                datetime.now().strftime("%Y-%m-%d"),
-                vendor_email,
-                consultant,
-                rate,
-                client_name,
-                filename,
-                "Submitted"
-            ])
-            message = "Data & Resume Saved Successfully!"
-        else:
-            message = "Google Sheet Connection Failed."
-
-    return render_template("dashboard.html", message=message)
-
-
-# ---------------- LOGOUT ----------------
-@app.route("/logout")
-def logout():
-    session.pop("user", None)
-    return redirect("/")
-
-
-# ---------------- RUN FOR RENDER ----------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+@app.get("/dashboard")
+def dashboard(user=Depends(get_current_user)):
+    db = SessionLocal()
+    total = db.query(Submission).count()
+    return {
+        "total_submissions": total
+    }
