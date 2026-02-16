@@ -28,7 +28,7 @@ def get_sheet():
         if not google_creds:
             return None
 
-        scope = ["https://www.googleapis.com/auth/spreadsheets"]
+        scope = ["https://www.googleapis.com/auth/BenchSalesAI"]
         creds_dict = json.loads(google_creds)
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
