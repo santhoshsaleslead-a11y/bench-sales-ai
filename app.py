@@ -1,3 +1,7 @@
+import os
+import gspread
+from google.oauth2.service_account import Credentials
+
 import gspread
 from google.oauth2.service_account import Credentials
 import os
@@ -6,13 +10,17 @@ from flask import Flask, render_template, request, redirect, session
 import openai
 import smtplib
 from email.mime.text import MIMEText
+import json
 
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
-
+google_creds = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+creds = Credentials.from_service_account_info(google_creds, scopes=scope)
 # Google Sheets Setup
 scope = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_file("credentials.json", scopes=scope)
+
+import json
+google_creds = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+creds = Credentials.from_service_account_info(google_creds, scopes=scope)
+
 client = gspread.authorize(creds)
 sheet = client.open("BenchSalesCRM").sheet1
 
